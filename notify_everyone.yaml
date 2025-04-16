@@ -49,7 +49,7 @@ fields:
       text:
   subtitle:
     name: SubTitle
-    description: Messge subtitle
+    description: Message subtitle
     required: false
     selector:
       text:
@@ -66,6 +66,7 @@ fields:
     required: false
     selector:
       text:
+    default: /lovelace
 
 sequence:
   - variables:
