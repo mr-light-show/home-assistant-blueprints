@@ -43,6 +43,24 @@ fields:
     required: true
     selector:
       text:
+    default: group
+  critical:
+    name: critical
+    description: is the message crital will overide do not disturbe?
+    required: true
+    selector:
+      select:
+        mode: dropdown 
+        options:
+            - label: "Quiet notifications without waking screen"
+              value: "passive"
+            - label: "Default behavior - does not override focus"
+              value: "active"
+            - label: "Important notifications - Overrides focus"
+              value: "time-sensitive"
+            - label: "Critical notifications - Overrides focus EVENT MUTE"
+              value: "critical"
+    default: "active"
   title:
     name: Title
     description: Title of the notification
@@ -61,20 +79,7 @@ fields:
     required: false
     selector:
       text:
-    default: Ladder.caf
-  critical:
-    name: critical
-    description: is the message crital (1 for critical)
-    required: false
-    selector:
-      select:
-        mode: dropdown 
-        options:
-            - label: "No"
-              value: "0"
-            - label: "Yes"
-              value: "1"
-    default: "0"    
+    default: Ladder.caf    
   url:
     name: URL
     description: URL to open on click   Relative URL to the dashboard you want to
@@ -119,6 +124,6 @@ sequence:
           url: '{{ url | default }}'
           clickAction: '{{ url | default }}'
           push:
-            interruption-level: active
+            interruption-level: '{{ critical | default(''active'') }}'
             sound: '{{ sound | default(''Ladder.caf'') }}'
-            critical: '{{ critical | default(''0'') }}'
+            volume: 1
