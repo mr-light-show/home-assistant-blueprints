@@ -1,37 +1,35 @@
 blueprint:
   domain: script
-  name: Notify everybody at home
-  source_url: https://github.com/mr-light-show/home-assistant-blueprints/blob/main/notify_everybody_at_home.yaml
+  name: Notify everyone
+  source_url: https://github.com/mr-light-show/home-assistant-blueprints/blob/main/notify_everyone.yaml
   input:
     person_service_map:
       name: Person notify services
-      description: >
-        Mappings between person names and their corresponding notify services.
-        The default value shows what the object should look like if the service 
-        `notify.mobile_app_john` belongs to `person.john`.
+      description: 'Mappings between person names and their corresponding notify services.
+        The default value shows what the object should look like if the service  `notify.mobile_app_john`
+        belongs to `person.john`.
 
+        '
       selector:
-        object:
+        object: {}
       default:
         john: notify.mobile_app_john
-
 mode: parallel
-
 fields:
-  persons:
-    name: Persons
-    description: >
-      List with persons who should get a notification. If not supplied, all
-      persons will be used.
+  people_to_always_notify:
+    name: People to always notify
+    description: 'List with people who should get a notification even if they are
+      not home.  one name per line ending with a :  "keith:"'
     required: false
     selector:
-      object:
-  title:
-    name: Title
-    description: Title of the notification
+      object: {}
+  people:
+    name: People at home
+    description: 'List with people who should get a notification. If not supplied,
+      all people will be used.  one name per line ending with a :  "keith:"'
     required: false
     selector:
-      text:
+      object: {}
   message:
     name: Message
     description: Message to send
@@ -39,27 +37,88 @@ fields:
     selector:
       text:
         multiline: true
-  data:
-    name: Data
-    description: Notification data object
+  group:
+    name: Group
+    description: Message Group
+    required: true
+    selector:
+      text:
+  title:
+    name: Title
+    description: Title of the notification
     required: false
     selector:
-      object:
+      text:
+  subtitle:
+    name: SubTitle
+    description: Messge subtitle
+    required: false
+    selector:
+      text:
+  sound:
+    name: Sound
+    description: Sound
+    required: false
+    selector:
+      text:
+    default: Ladder.caf
+  critical:
+    name: critical
+    description: is the message crital (1 for critical)
+    required: false
+    selector:
+      select:
+        mode: dropdown 
+        options:
+            - label: "No"
+              value: "0"
+            - label: "Yes"
+              value: "1"
+    default: "0"    
+  url:
+    name: URL
+    description: URL to open on click   Relative URL to the dashboard you want to
+      show "/lovelace/test
+    required: false
+    selector:
+      text:
 sequence:
-  - variables:
-      person_service_map: !input person_service_map
-      persons: >
-        {% set all_persons = person_service_map.keys() | list %}
-        {{ persons | default(all_persons, true) }}
-  - repeat:
-      count: "{{ persons | count }}"
-      sequence:
-        - choose:
-            conditions:
-              - "{{ is_state('person.' ~ persons[repeat.index - 1], 'home') }}"
-            sequence:
-              - service: "{{ person_service_map[persons[repeat.index - 1]] }}"
-                data:
-                  title: "{{ title | default }}"
-                  message: "{{ message | default }}"
-                  data: "{{ data | default({}) }}"
+- variables:
+    person_service_map: !input person_service_map
+    people: '{% set all_persons = person_service_map.keys() | list %} {{ people |
+      default(all_persons, true) }}
+
+      '
+    people_at_home: []
+    notify_list: '{{ people_to_always_notify | default }}
+
+      '
+- repeat:
+    count: '{{ people | count }}'
+    sequence:
+    - choose:
+        conditions:
+        - '{{ is_state(''person.'' ~ people[repeat.index - 1], ''home'') }}'
+        sequence:
+        - variables:
+            people_at_home: '{{ people_at_home + [people[repeat.index - 1]] }}'
+- variables:
+    notify_list: '{{ union(people_at_home | list, notify_list | list) }}'
+- repeat:
+    count: '{{ notify_list | count }}'
+    sequence:
+    - service: '{{ person_service_map[notify_list[repeat.index - 1]] }}'
+      data:
+        title: '{{ title | default }}'
+        message: '{{ message | default }}'
+        data:
+          group: '{{ group | default }}'
+          tag: '{{ group | default }}'
+          subtitle: '{{ subtitle | default }}'
+          subject: '{{ subtitle | default }}'
+          url: '{{ url | default }}'
+          clickAction: '{{ url | default }}'
+          push:
+            interruption-level: active
+            sound: '{{ sound | default(''Ladder.caf'') }}'
+            critical: '{{ critical | default(''0'') }}'
