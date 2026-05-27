@@ -5,26 +5,28 @@ blueprint:
   input:
     person_service_map:
       name: Person notify services
-      description: >
-        Mappings between person names and their corresponding notify services.
-        The default value shows what the object should look like if the service 
-        `notify.mobile_app_john` belongs to `person.john`.
+      description: 'Mappings between person names and their corresponding notify services.
+        The default value shows what the object should look like if the service  `notify.mobile_app_john`
+        belongs to `person.john`.
 
+        '
       selector:
         object: {}
       default:
         john: notify.mobile_app_john
-mode: parallel
+mode: restart
 fields:
   people_to_always_notify:
     name: People to always notify
-    description: 'List with people who should get a notification even if they are not home.  one name per line ending with a :  "keith:"'
+    description: 'List with people who should get a notification even if they are
+      not home.  one name per line ending with a :  "keith:"'
     required: false
     selector:
       object: {}
   people:
     name: People at home
-    description: 'List with people who should get a notification. If not supplied, all people will be used.  one name per line ending with a :  "keith:"'
+    description: 'List with people who should get a notification. If not supplied,
+      all people will be used.  one name per line ending with a :  "keith:"'
     required: false
     selector:
       object: {}
@@ -41,6 +43,24 @@ fields:
     required: true
     selector:
       text:
+    default: group
+  critical:
+    name: critical
+    description: is the message crital will overide do not disturbe?
+    required: true
+    selector:
+      select:
+        mode: dropdown
+        options:
+          - label: "Quiet notifications without waking screen"
+            value: "passive"
+          - label: "Default behavior - does not override focus"
+            value: "active"
+          - label: "Important notifications - Overrides focus"
+            value: "time-sensitive"
+          - label: "Critical notifications - Overrides focus EVENT MUTE"
+            value: "critical"
+    default: "active"
   title:
     name: Title
     description: Title of the notification
@@ -62,48 +82,47 @@ fields:
     default: Ladder.caf
   url:
     name: URL
-    description: URL to open on click   Relative URL to the dashboard you want to show "/lovelace/test
+    description: URL to open on click   Relative URL to the dashboard you want to
+      show "/lovelace/test
     required: false
     selector:
       text:
-
 sequence:
   - variables:
       person_service_map: !input person_service_map
-      people: >
-        {% set all_persons = person_service_map.keys() | list %}
-        {{ people | default(all_persons, true) }}
-      people_at_home: []
-      notify_list: >
-        {{ people_to_always_notify | default }}
-
+      notify_actions: >-
+        {% set pmap = person_service_map %}
+        {% set people_list = people.keys() | list if people is mapping
+           else people | default(pmap.keys() | list, true) | list %}
+        {% set always_list = people_to_always_notify.keys() | list if people_to_always_notify is mapping
+           else people_to_always_notify | default([], true) | list %}
+        {% set ns = namespace(actions=[]) %}
+        {% for p in always_list %}
+          {% if p in pmap and pmap[p] not in ns.actions %}
+            {% set ns.actions = ns.actions + [pmap[p]] %}
+          {% endif %}
+        {% endfor %}
+        {% for p in people_list %}
+          {% if is_state('person.' ~ p, 'home') and p in pmap and pmap[p] not in ns.actions %}
+            {% set ns.actions = ns.actions + [pmap[p]] %}
+          {% endif %}
+        {% endfor %}
+        {{ ns.actions }}
   - repeat:
-      count: '{{ people | count }}'
+      for_each: "{{ notify_actions }}"
       sequence:
-        - choose:
-            conditions:
-              - '{{ is_state(''person.'' ~ people[repeat.index - 1], ''home'') }}'
-            sequence:
-              - variables:
-                  people_at_home: "{{ people_at_home + [people[repeat.index - 1]] }}"
-
-  - variables:
-      notify_list: "{{ union(people_at_home | list, notify_list | list) }}"
-
-  - repeat:
-      count: "{{ notify_list | count }}"
-      sequence:
-        - service: "{{ person_service_map[notify_list[repeat.index - 1]] }}"
+        - action: "{{ repeat.item }}"
           data:
-            title: '{{ title | default }}'
-            message: '{{ message | default }}'
+            title: "{{ title | default('') }}"
+            message: "{{ message | default('') }}"
             data:
-              group: '{{ group | default }}'
-              tag: '{{ group | default }}'
-              subtitle: '{{ subtitle | default }}'
-              subject: '{{ subtitle | default }}'
-              url: '{{ url | default }}'
-              clickAction: '{{ url | default }}'
+              group: "{{ group | default('group') }}"
+              tag: "{{ group | default('group') }}"
+              subtitle: "{{ subtitle | default('') }}"
+              subject: "{{ subtitle | default('') }}"
+              url: "{{ url | default('') }}"
+              clickAction: "{{ url | default('') }}"
               push:
-                interruption-level: 'active'
-                sound: '{{ sound | default(''Ladder.caf'') }}'
+                interruption-level: "{{ critical | default('active') }}"
+                sound: "{{ sound | default('Ladder.caf') }}"
+                volume: 1
