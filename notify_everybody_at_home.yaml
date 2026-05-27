@@ -50,16 +50,16 @@ fields:
     required: true
     selector:
       select:
-        mode: dropdown 
+        mode: dropdown
         options:
-            - label: "Quiet notifications without waking screen"
-              value: "passive"
-            - label: "Default behavior - does not override focus"
-              value: "active"
-            - label: "Important notifications - Overrides focus"
-              value: "time-sensitive"
-            - label: "Critical notifications - Overrides focus EVENT MUTE"
-              value: "critical"
+          - label: "Quiet notifications without waking screen"
+            value: "passive"
+          - label: "Default behavior - does not override focus"
+            value: "active"
+          - label: "Important notifications - Overrides focus"
+            value: "time-sensitive"
+          - label: "Critical notifications - Overrides focus EVENT MUTE"
+            value: "critical"
     default: "active"
   title:
     name: Title
@@ -79,7 +79,7 @@ fields:
     required: false
     selector:
       text:
-    default: Ladder.caf    
+    default: Ladder.caf
   url:
     name: URL
     description: URL to open on click   Relative URL to the dashboard you want to
@@ -88,42 +88,41 @@ fields:
     selector:
       text:
 sequence:
-- variables:
-    person_service_map: !input person_service_map
-    people: '{% set all_persons = person_service_map.keys() | list %} {{ people |
-      default(all_persons, true) }}
-
-      '
-    people_at_home: []
-    notify_list: '{{ people_to_always_notify | default }}
-
-      '
-- repeat:
-    count: '{{ people | count }}'
-    sequence:
-    - choose:
-        conditions:
-        - '{{ is_state(''person.'' ~ people[repeat.index - 1], ''home'') }}'
-        sequence:
-        - variables:
-            people_at_home: '{{ people_at_home + [people[repeat.index - 1]] }}'
-- variables:
-    notify_list: '{{ union(people_at_home | list, notify_list | list) }}'
-- repeat:
-    count: '{{ notify_list | count }}'
-    sequence:
-    - service: '{{ person_service_map[notify_list[repeat.index - 1]] }}'
-      data:
-        title: '{{ title | default }}'
-        message: '{{ message | default }}'
-        data:
-          group: '{{ group | default }}'
-          tag: '{{ group | default }}'
-          subtitle: '{{ subtitle | default }}'
-          subject: '{{ subtitle | default }}'
-          url: '{{ url | default }}'
-          clickAction: '{{ url | default }}'
-          push:
-            interruption-level: '{{ critical | default(''active'') }}'
-            sound: '{{ sound | default(''Ladder.caf'') }}'
-            volume: 1
+  - variables:
+      person_service_map: !input person_service_map
+      notify_actions: >-
+        {% set pmap = person_service_map %}
+        {% set people_list = people.keys() | list if people is mapping
+           else people | default(pmap.keys() | list, true) | list %}
+        {% set always_list = people_to_always_notify.keys() | list if people_to_always_notify is mapping
+           else people_to_always_notify | default([], true) | list %}
+        {% set ns = namespace(actions=[]) %}
+        {% for p in always_list %}
+          {% if p in pmap and pmap[p] not in ns.actions %}
+            {% set ns.actions = ns.actions + [pmap[p]] %}
+          {% endif %}
+        {% endfor %}
+        {% for p in people_list %}
+          {% if is_state('person.' ~ p, 'home') and p in pmap and pmap[p] not in ns.actions %}
+            {% set ns.actions = ns.actions + [pmap[p]] %}
+          {% endif %}
+        {% endfor %}
+        {{ ns.actions }}
+  - repeat:
+      for_each: "{{ notify_actions }}"
+      sequence:
+        - action: "{{ repeat.item }}"
+          data:
+            title: "{{ title | default('') }}"
+            message: "{{ message | default('') }}"
+            data:
+              group: "{{ group | default('group') }}"
+              tag: "{{ group | default('group') }}"
+              subtitle: "{{ subtitle | default('') }}"
+              subject: "{{ subtitle | default('') }}"
+              url: "{{ url | default('') }}"
+              clickAction: "{{ url | default('') }}"
+              push:
+                interruption-level: "{{ critical | default('active') }}"
+                sound: "{{ sound | default('Ladder.caf') }}"
+                volume: 1
