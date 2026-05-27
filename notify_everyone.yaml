@@ -1,68 +1,98 @@
 blueprint:
-  domain: script
   name: Notify everyone
-  source_url: https://github.com/mr-light-show/home-assistant-blueprints/blob/main/notify_everyone.yaml
+  description: Notify people at home (and optional always-notify list) via Companion app.
+  domain: script
+  source_url: https://github.com/mr-light-show/home-assistant-blueprints
   input:
     person_service_map:
       name: Person notify services
       description: >
-        Mappings between person names and their corresponding notify services.
-        The default value shows what the object should look like if the service 
-        `notify.mobile_app_john` belongs to `person.john`.
-
+        Add each household member and their mobile app device. Also supports
+        legacy YAML map form, e.g. john: notify.mobile_app_john
       selector:
-        object: {}
-      default:
-        john: notify.mobile_app_john
+        object:
+          label_field: person
+          description_field: notify_device
+          multiple: true
+          fields:
+            person:
+              label: Person
+              required: true
+              selector:
+                entity:
+                  filter:
+                    - domain: person
+            notify_device:
+              label: Mobile app device
+              required: true
+              selector:
+                device:
+                  integration: mobile_app
+            notify_entity:
+              label: Notify entity (optional)
+              description: >
+                Use instead of device if you have notify.* entities (HA 2024+).
+                Leave empty to derive notify.mobile_app_* from the device name.
+              required: false
+              selector:
+                entity:
+                  filter:
+                    - domain: notify
+
 mode: parallel
+
 fields:
   people_to_always_notify:
     name: People to always notify
-    description: 'List with people who should get a notification even if they are not home.  one name per line ending with a :  "keith:"'
+    description: Notify these people even when not home.
     required: false
     selector:
-      object: {}
+      entity:
+        filter:
+          - domain: person
+        multiple: true
   people:
     name: People at home
-    description: 'List with people who should get a notification. If not supplied, all people will be used.  one name per line ending with a :  "keith:"'
+    description: >
+      Only consider these people for home presence. Leave empty to use everyone
+      configured in Person notify services.
     required: false
     selector:
-      object: {}
+      entity:
+        filter:
+          - domain: person
+        multiple: true
   message:
     name: Message
-    description: Message to send
     required: true
     selector:
       text:
         multiline: true
   group:
     name: Group
-    description: Message Group
+    description: Notification group / tag
     required: true
     selector:
       text:
   title:
     name: Title
-    description: Title of the notification
     required: false
     selector:
       text:
   subtitle:
     name: SubTitle
-    description: Messge subtitle
     required: false
     selector:
       text:
   sound:
     name: Sound
-    description: Sound
     required: false
     selector:
       text:
     default: Ladder.caf
   url:
     name: URL
-    description: URL to open on click   Relative URL to the dashboard you want to show "/lovelace/test
+    description: Relative dashboard URL, e.g. /lovelace/home
     required: false
     selector:
       text:
@@ -70,40 +100,101 @@ fields:
 sequence:
   - variables:
       person_service_map: !input person_service_map
-      people: >
-        {% set all_persons = person_service_map.keys() | list %}
-        {{ people | default(all_persons, true) }}
-      people_at_home: []
-      notify_list: >
-        {{ people_to_always_notify | default }}
+      notify_targets: >-
+        {% set ns = namespace(targets=[]) %}
+        {% if person_service_map is mapping %}
+          {% for slug, target in person_service_map.items() %}
+            {% set ns.targets = ns.targets + [{'slug': slug, 'notify': target}] %}
+          {% endfor %}
+        {% else %}
+          {% for row in person_service_map %}
+            {% set slug = row.person.split('.')[1] %}
+            {% if row.notify_entity is defined and row.notify_entity %}
+              {% set target = row.notify_entity %}
+            {% else %}
+              {% set dev_name = device_attr(row.notify_device, 'name') %}
+              {% set target = 'notify.mobile_app_' + (dev_name | slugify) %}
+            {% endif %}
+            {% set ns.targets = ns.targets + [{'slug': slug, 'notify': target}] %}
+          {% endfor %}
+        {% endif %}
+        {{ ns.targets }}
+      people_slugs: >-
+        {% set configured = notify_targets | map(attribute='slug') | list %}
+        {% if people is string %}
+          {% set picked = [people.split('.')[1]] %}
+        {% elif people is iterable and people is not mapping and people | count > 0 %}
+          {% set picked = people | map('regex_replace', '^person\\.', '') | list %}
+        {% elif people is mapping and people | count > 0 %}
+          {% set picked = people.keys() | list %}
+        {% else %}
+          {% set picked = configured %}
+        {% endif %}
+        {{ picked }}
+      always_slugs: >-
+        {% if people_to_always_notify is string %}
+          {{ [people_to_always_notify.split('.')[1]] }}
+        {% elif people_to_always_notify is iterable and people_to_always_notify is not mapping %}
+          {{ people_to_always_notify | map('regex_replace', '^person\\.', '') | list }}
+        {% elif people_to_always_notify is mapping %}
+          {{ people_to_always_notify.keys() | list }}
+        {% else %}
+          {{ [] }}
+        {% endif %}
+      notify_actions: >-
+        {% set ns = namespace(actions=[]) %}
+        {% for row in notify_targets %}
+          {% if row.slug in always_slugs and row.notify not in ns.actions %}
+            {% set ns.actions = ns.actions + [row.notify] %}
+          {% endif %}
+        {% endfor %}
+        {% for row in notify_targets %}
+          {% if row.slug in people_slugs
+             and is_state('person.' ~ row.slug, 'home')
+             and row.notify not in ns.actions %}
+            {% set ns.actions = ns.actions + [row.notify] %}
+          {% endif %}
+        {% endfor %}
+        {{ ns.actions }}
 
   - repeat:
-      count: '{{ people | count }}'
+      for_each: "{{ notify_actions }}"
       sequence:
         - choose:
-            conditions:
-              - '{{ is_state(''person.'' ~ people[repeat.index - 1], ''home'') }}'
-            sequence:
-              - variables:
-                  people_at_home: "{{ people_at_home + [people[repeat.index - 1]] }}"
-
-  - variables:
-      notify_list: "{{ union(people_at_home | list, notify_list | list) }}"
-
-  - repeat:
-      count: "{{ notify_list | count }}"
-      sequence:
-        - service: "{{ person_service_map[notify_list[repeat.index - 1]] }}"
-          data:
-            title: '{{ title | default }}'
-            message: '{{ message | default }}'
-            data:
-              group: '{{ group | default }}'
-              tag: '{{ group | default }}'
-              subtitle: '{{ subtitle | default }}'
-              subject: '{{ subtitle | default }}'
-              url: '{{ url | default }}'
-              clickAction: '{{ url | default }}'
-              push:
-                interruption-level: 'active'
-                sound: '{{ sound | default(''Ladder.caf'') }}'
+            - conditions:
+                - condition: template
+                  value_template: >-
+                    {{ repeat.item.startswith('notify.')
+                       and states(repeat.item) not in ['unknown', 'unavailable', none] }}
+              sequence:
+                - action: notify.send_message
+                  target:
+                    entity_id: "{{ repeat.item }}"
+                  data:
+                    title: "{{ title | default('') }}"
+                    message: "{{ message }}"
+                    data:
+                      group: "{{ group }}"
+                      tag: "{{ group }}"
+                      subtitle: "{{ subtitle | default('') }}"
+                      subject: "{{ subtitle | default('') }}"
+                      url: "{{ url | default('') }}"
+                      clickAction: "{{ url | default('') }}"
+                      push:
+                        interruption-level: active
+                        sound: "{{ sound | default('Ladder.caf') }}"
+            default:
+              - action: "{{ repeat.item }}"
+                data:
+                  title: "{{ title | default('') }}"
+                  message: "{{ message }}"
+                  data:
+                    group: "{{ group }}"
+                    tag: "{{ group }}"
+                    subtitle: "{{ subtitle | default('') }}"
+                    subject: "{{ subtitle | default('') }}"
+                    url: "{{ url | default('') }}"
+                    clickAction: "{{ url | default('') }}"
+                    push:
+                      interruption-level: active
+                      sound: "{{ sound | default('Ladder.caf') }}"
